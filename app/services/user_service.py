@@ -121,7 +121,7 @@ class UserService:
             await cls._execute_query(session, query)
             updated_user = await cls.get_by_id(session, user_id)
             if updated_user:
-                session.refresh(updated_user)  # Explicitly refresh the updated user object
+                await session.refresh(updated_user)  # Explicitly refresh the updated user object
                 logger.info(f"User {user_id} updated successfully.")
                 return updated_user
             else:
@@ -152,19 +152,17 @@ class UserService:
         return await cls.create(session, user_data, get_email_service)
     
 
-# login user
     @classmethod
     async def login_user(cls, session: AsyncSession, email: str, password: str) -> User:
         user = await cls.get_by_email(session, email)
         if not user:
             raise ValueError("Incorrect email or password.")
 
-    # ✅ Prioritize lock over email verification
-        if user.is_locked:
-            raise ValueError("Account is locked due to too many failed login attempts.")
-
         if not user.email_verified:
             raise ValueError("Email not verified.")
+
+        if user.is_locked:
+            raise ValueError("Account is locked due to too many failed login attempts.")
 
         if not verify_password(password, user.hashed_password):
             user.failed_login_attempts += 1
@@ -174,13 +172,13 @@ class UserService:
             await session.commit()
             raise ValueError("Incorrect email or password.")
 
+        # Successful login
         user.failed_login_attempts = 0
         user.last_login_at = datetime.now(timezone.utc)
         session.add(user)
         await session.commit()
         return user
 
-# is account locked
     @classmethod
     async def is_account_locked(cls, session: AsyncSession, email: str) -> bool:
         user = await cls.get_by_email(session, email)
@@ -235,3 +233,43 @@ class UserService:
             await session.commit()
             return True
         return False
+    
+    @classmethod
+    async def set_professional_status(cls, session: AsyncSession, user_id: UUID, status: bool) -> Optional[User]:
+        """
+        Set or unset professional status for a user and update the timestamp.
+        """
+        try:
+            user = await cls.get_by_id(session, user_id)
+            if not user:
+                return None
+
+            user.is_professional = bool(status)
+            user.professional_status_updated_at = datetime.now(timezone.utc)
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+            return user
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to set professional status for {user_id}: {e}")
+            await session.rollback()
+            return None
+        
+    @classmethod
+    async def search_users(db: AsyncSession, query: str):
+        """
+        Search users by first name, last name, or email.
+        Returns a list of matching User objects.
+        """
+        stmt = (
+            select(User)
+            .where(
+                (User.first_name.ilike(f"%{query}%")) |
+                (User.last_name.ilike(f"%{query}%")) |
+                (User.email.ilike(f"%{query}%"))
+            )
+            .order_by(User.first_name.asc())
+        )
+
+        result = await db.execute(stmt)
+        return result.scalars().all()

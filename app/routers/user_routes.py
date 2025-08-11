@@ -33,6 +33,10 @@ from app.services.jwt_service import create_access_token
 from app.utils.link_generation import create_user_links, generate_pagination_links
 from app.dependencies import get_settings
 from app.services.email_service import EmailService
+from app.schemas.user_schemas import UserUpdate, UserResponse, ProfessionalStatusUpdate
+import logging
+from typing import List
+
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
@@ -70,7 +74,7 @@ async def get_user(user_id: UUID, request: Request, db: AsyncSession = Depends(g
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
-        links=create_user_links(user.id, request)  
+        links=create_user_links(user.id, request),
     )
 
 # Additional endpoints for update, delete, create, and list users follow a similar pattern, using
@@ -193,21 +197,14 @@ async def list_users(
         links=pagination_links  # Ensure you have appropriate logic to create these links
     )
 
-# router.post register
-@router.post("/register/", response_model=UserResponse, tags=["Login and Registration"])
-async def register(
-    user_data: UserCreate,
-    session: AsyncSession = Depends(get_db),
-    email_service: EmailService = Depends(get_email_service),
-):
-    try:
-        user = await UserService.register_user(session, user_data.model_dump(), email_service)
-        return user
-    except ValueError as ve:
-        # e.g., duplicate email or other input problems
-        raise HTTPException(status_code=400, detail=str(ve))
 
-# router.post login
+@router.post("/register/", response_model=UserResponse, tags=["Login and Registration"])
+async def register(user_data: UserCreate, session: AsyncSession = Depends(get_db), email_service: EmailService = Depends(get_email_service)):
+    user = await UserService.register_user(session, user_data.model_dump(), email_service)
+    if user:
+        return user
+    raise HTTPException(status_code=400, detail="Email already exists")
+
 @router.post("/login/", response_model=TokenResponse, tags=["Login and Registration"])
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_db)):
     try:
@@ -239,3 +236,117 @@ async def verify_email(user_id: UUID, token: str, db: AsyncSession = Depends(get
     if await UserService.verify_email_with_token(db, user_id, token):
         return {"message": "Email verified successfully"}
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+
+@router.patch("/users/me", response_model=UserResponse, name="update_current_user", tags=["User Profile"])
+async def update_current_user(
+    payload: UserUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """
+    Update the authenticated user's profile fields. Partial update allowed.
+    """
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # Prevent regular users from changing professional status directly
+    update_data.pop("is_professional", None)
+    update_data.pop("professional_status_updated_at", None)
+    
+    updated_user = await UserService.update(db, current_user.id, update_data)
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    try:
+        resp = UserResponse.model_validate(updated_user)
+        if hasattr(resp, "model_dump"):
+            user_dict = resp.model_dump()
+            user_dict["links"] = create_user_links(updated_user.id, request)
+            return user_dict
+    except Exception:
+        # fallback to manual construction similar to other endpoints in your repo
+        return UserResponse.model_construct(
+            id=updated_user.id,
+            nickname=updated_user.nickname,
+            first_name=updated_user.first_name,
+            last_name=updated_user.last_name,
+            bio=updated_user.bio,
+            profile_picture_url=updated_user.profile_picture_url,
+            github_profile_url=updated_user.github_profile_url,
+            linkedin_profile_url=updated_user.linkedin_profile_url,
+            role=updated_user.role,
+            email=updated_user.email,
+            last_login_at=updated_user.last_login_at,
+            created_at=updated_user.created_at,
+            updated_at=updated_user.updated_at,
+            is_professional=updated_user.is_professional,
+            professional_status_updated_at=updated_user.professional_status_updated_at,
+            links=create_user_links(updated_user.id, request),
+        )
+
+@router.patch("/users/{user_id}/professional-status", response_model=UserResponse, name="set_professional_status", tags=["User Profile Requires (Admin or Manager Roles)"])
+async def set_professional_status(
+    user_id: UUID,
+    payload: ProfessionalStatusUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    email_service: EmailService = Depends(get_email_service),
+    current_user = Depends(require_role(["ADMIN", "MANAGER"])),
+):
+    """
+    Managers/Admins can set or unset a user's professional status.
+    Body: { "is_professional": true }
+    """
+    status_value = bool(payload.is_professional)
+    updated_user = await UserService.set_professional_status(db, user_id, status_value)
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    # Send notification email only if upgrading
+    if status_value:
+        try:
+            await email_service.send_professional_status_upgrade_email(
+                updated_user,
+                upgraded_by=getattr(current_user, "email", None)
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                f"Failed to send professional status email to {updated_user.email}: {e}"
+            )
+
+    # Return same pattern as above
+    try:
+        resp = UserResponse.model_validate(updated_user)
+        user_dict = resp.model_dump()
+        user_dict["links"] = create_user_links(updated_user.id, request)
+        return user_dict
+    except Exception:
+        return UserResponse.model_construct(
+            id=updated_user.id,
+            nickname=updated_user.nickname,
+            first_name=updated_user.first_name,
+            last_name=updated_user.last_name,
+            bio=updated_user.bio,
+            profile_picture_url=updated_user.profile_picture_url,
+            github_profile_url=updated_user.github_profile_url,
+            linkedin_profile_url=updated_user.linkedin_profile_url,
+            role=updated_user.role,
+            email=updated_user.email,
+            last_login_at=updated_user.last_login_at,
+            created_at=updated_user.created_at,
+            updated_at=updated_user.updated_at,
+            is_professional=updated_user.is_professional,
+            professional_status_updated_at=updated_user.professional_status_updated_at,
+            links=create_user_links(updated_user.id, request),
+        )
+    
+@router.get("/users/search", response_model=List[UserResponse], tags=["User Management"])
+async def search_users_for_upgrade(
+    query: str,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_role(["ADMIN", "MANAGER"]))
+):
+    """
+    Admins can search users for professional status upgrade.
+    """
+    users = await UserService.search_users(db, query)
+    return [UserResponse.model_validate(u) for u in users]
