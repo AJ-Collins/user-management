@@ -256,7 +256,9 @@ class UserService:
             if user.is_professional:
                 await email_service.send_professional_status_upgrade_email(user.email)
             return user
-            return user
+        except ValueError as ve:
+            logger.error(f"Authorization error: {str(ve)}")
+            raise
         except SQLAlchemyError as e:
             logger.error(f"Failed to set professional status for {user_id}: {e}")
             await session.rollback()
