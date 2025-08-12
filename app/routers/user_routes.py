@@ -40,7 +40,6 @@ from app.models.user_model import User
 
 logger = logging.getLogger(__name__)
 
-
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 settings = get_settings()
@@ -77,7 +76,7 @@ async def get_user(user_id: UUID, request: Request, db: AsyncSession = Depends(g
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
-        links=create_user_links(user.id, request),
+        links=create_user_links(user.id, request)  
     )
 
 # Additional endpoints for update, delete, create, and list users follow a similar pattern, using
@@ -200,40 +199,39 @@ async def list_users(
         links=pagination_links  # Ensure you have appropriate logic to create these links
     )
 
-
-@router.post("/register/", response_model=UserResponse, status_code=201, tags=["Authentication"], name="register_user")
-async def register(user_data: UserCreate, session: AsyncSession = Depends(get_db), email_service: EmailService = Depends(get_email_service)):
+# router.post register
+@router.post("/register/", response_model=UserResponse, tags=["Login and Registration"])
+async def register(
+    user_data: UserCreate,
+    session: AsyncSession = Depends(get_db),
+    email_service: EmailService = Depends(get_email_service),
+):
     try:
         user = await UserService.register_user(session, user_data.model_dump(), email_service)
-        if user:
-            return UserResponse.model_validate(user)
-    except ValueError as e:
-        if "already exists" in str(e).lower():
-            raise HTTPException(status_code=400, detail=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Registration error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Registration failed")
+        return user
+    except ValueError as ve:
+        # e.g., duplicate email or other input problems
+        raise HTTPException(status_code=400, detail=str(ve))
 
+# router.post login
 @router.post("/login/", response_model=TokenResponse, tags=["Login and Registration"])
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_db)):
     try:
         user = await UserService.login_user(session, form_data.username, form_data.password)
-        if user.is_locked:
-            raise HTTPException(status_code=400, detail="Account is locked due to too many failed login attempts.")
-        if not user.email_verified:
-            raise HTTPException(status_code=400, detail="Email not verified.")
+
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = create_access_token(
             data={"sub": user.email, "role": str(user.role.name)},
             expires_delta=access_token_expires
         )
         return {"access_token": access_token, "token_type": "bearer"}
+
     except ValueError as ve:
         msg = str(ve)
-        if msg == "Incorrect email or password.":
+        if msg in ["Incorrect email or password."]:
             raise HTTPException(status_code=401, detail=msg)
-        raise HTTPException(status_code=400, detail=msg)
+        else:
+            raise HTTPException(status_code=400, detail=msg)
 
 
 @router.get("/verify-email/{user_id}/{token}", status_code=status.HTTP_200_OK, name="verify_email", tags=["Login and Registration"])
@@ -333,7 +331,6 @@ async def set_professional_status(
             links=create_user_links(updated_user.id, request),
         )
     except Exception as e:
-        logger.error(f"Error setting professional status: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
     
 @router.get("/users/search", response_model=List[UserResponse], tags=["User Management"])
@@ -346,5 +343,4 @@ async def search_users_for_upgrade(
         users = await UserService.search_users(db, query)
         return [UserResponse.model_validate(u) for u in users]
     except Exception as e:
-        logger.error(f"Error searching users: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")

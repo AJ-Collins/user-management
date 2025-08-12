@@ -36,9 +36,6 @@ from app.utils.security import hash_password
 from app.utils.template_manager import TemplateManager
 from app.services.email_service import EmailService
 from app.services.jwt_service import create_access_token
-from app.dependencies import get_current_user
-from app.config import Settings 
-
 
 fake = Faker()
 
@@ -48,19 +45,10 @@ engine = create_async_engine(TEST_DATABASE_URL, echo=settings.debug)
 AsyncTestingSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 AsyncSessionScoped = scoped_session(AsyncTestingSessionLocal)
 
-class TestSettings(Settings):
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"
-    debug: bool = False
-    max_login_attempts: int = 5
-    send_real_mail: str = "false"
-    jwt_secret_key: str = "testsecret"
-    jwt_algorithm: str = "HS256"
-
-# Override settings dependency for all tests
-app.dependency_overrides[get_settings] = lambda: TestSettings()
 
 @pytest.fixture
 def email_service():
+    # Assuming the TemplateManager does not need any arguments for initialization
     template_manager = TemplateManager()
     email_service = EmailService(template_manager=template_manager)
     return email_service
@@ -238,3 +226,15 @@ def manager_token(manager_user):
 def user_token(user):
     token_data = {"sub": str(user.id), "role": user.role.name}
     return create_access_token(data=token_data, expires_delta=timedelta(minutes=30))
+
+@pytest.fixture
+def email_service():
+    if settings.send_real_mail == 'true':
+        # Return the real email service when specifically testing email functionality
+        return EmailService()
+    else:
+        # Otherwise, use a mock to prevent actual email sending
+        mock_service = AsyncMock(spec=EmailService)
+        mock_service.send_verification_email.return_value = None
+        mock_service.send_user_email.return_value = None
+        return mock_service

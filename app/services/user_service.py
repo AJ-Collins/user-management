@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, null, update, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.config import get_settings
+from app.dependencies import get_email_service, get_settings
 from app.models.user_model import User
 from app.schemas.user_schemas import UserCreate, UserUpdate
 from app.utils.nickname_gen import generate_nickname
@@ -121,7 +121,7 @@ class UserService:
             await cls._execute_query(session, query)
             updated_user = await cls.get_by_id(session, user_id)
             if updated_user:
-                await session.refresh(updated_user)  # Explicitly refresh the updated user object
+                session.refresh(updated_user)  # Explicitly refresh the updated user object
                 logger.info(f"User {user_id} updated successfully.")
                 return updated_user
             else:
@@ -152,48 +152,37 @@ class UserService:
         return await cls.create(session, user_data, get_email_service)
     
 
+# login user
     @classmethod
     async def login_user(cls, session: AsyncSession, email: str, password: str) -> User:
         user = await cls.get_by_email(session, email)
         if not user:
-            # Don't reveal which part failed for security
             raise ValueError("Incorrect email or password.")
-        
-        # Check if account is locked
+
+    # ✅ Prioritize lock over email verification
         if user.is_locked:
             raise ValueError("Account is locked due to too many failed login attempts.")
-        
-        # Check email verification
+
         if not user.email_verified:
             raise ValueError("Email not verified.")
-        
-        # Verify password
+
         if not verify_password(password, user.hashed_password):
-            # Increment failed attempts
             user.failed_login_attempts += 1
-            
-            # Lock account if max attempts reached
             if user.failed_login_attempts >= settings.max_login_attempts:
                 user.is_locked = True
-                
-            # Save the changes
             session.add(user)
             await session.commit()
-            
-            # Always raise the same error message for security
             raise ValueError("Incorrect email or password.")
-        
-        # Successful login - reset failed attempts
+
         user.failed_login_attempts = 0
         user.last_login_at = datetime.now(timezone.utc)
         session.add(user)
         await session.commit()
-        
         return user
 
+# is account locked
     @classmethod
     async def is_account_locked(cls, session: AsyncSession, email: str) -> bool:
-        """Check if an account is locked"""
         user = await cls.get_by_email(session, email)
         return user.is_locked if user else False
 
