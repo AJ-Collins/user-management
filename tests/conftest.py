@@ -36,6 +36,7 @@ from app.utils.security import hash_password
 from app.utils.template_manager import TemplateManager
 from app.services.email_service import EmailService
 from app.services.jwt_service import create_access_token
+from app.database import engine
 
 fake = Faker()
 

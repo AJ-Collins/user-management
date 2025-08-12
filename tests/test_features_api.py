@@ -99,7 +99,7 @@ async def test_update_profile_with_all_fields(db_session: AsyncSession, test_use
     assert updated_user.profile_picture_url == user_data["profile_picture_url"]
     assert updated_user.linkedin_profile_url == user_data["linkedin_profile_url"]
     assert updated_user.github_profile_url == user_data["github_profile_url"]
-    assert updated_user.role == UserRole.AUTHENTICATED.value
+    assert updated_user.role == UserRole.AUTHENTICATED 
 
 async def test_update_profile_invalid_payload(db_session: AsyncSession, test_user: User):
     """Test update with invalid payload (e.g., incorrect email format)."""
