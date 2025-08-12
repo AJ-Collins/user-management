@@ -92,9 +92,9 @@ async def db_session(setup_database):
 
 @pytest.fixture(scope="function")
 async def locked_user(db_session):
-    unique_email = fake.email()
+    unique_email = fake.unique.email()
     user_data = {
-        "nickname": fake.user_name(),
+        "nickname": fake.unique.user_name(),
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
         "email": unique_email,
@@ -112,10 +112,10 @@ async def locked_user(db_session):
 @pytest.fixture(scope="function")
 async def user(db_session):
     user_data = {
-        "nickname": fake.user_name(),
+        "nickname": fake.unique.user_name(),
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
-        "email": fake.email(),
+        "email": fake.unique.email(),
         "hashed_password": hash_password("MySuperPassword$1234"),
         "role": UserRole.AUTHENTICATED,
         "email_verified": False,
@@ -129,10 +129,10 @@ async def user(db_session):
 @pytest.fixture(scope="function")
 async def verified_user(db_session):
     user_data = {
-        "nickname": fake.user_name(),
+        "nickname": fake.unique.user_name(),
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
-        "email": fake.email(),
+        "email": fake.unique.email(),
         "hashed_password": hash_password("MySuperPassword$1234"),
         "role": UserRole.AUTHENTICATED,
         "email_verified": True,
@@ -146,10 +146,10 @@ async def verified_user(db_session):
 @pytest.fixture(scope="function")
 async def unverified_user(db_session):
     user_data = {
-        "nickname": fake.user_name(),
+        "nickname": fake.unique.user_name(),
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
-        "email": fake.email(),
+        "email": fake.unique.email(),
         "hashed_password": hash_password("MySuperPassword$1234"),
         "role": UserRole.AUTHENTICATED,
         "email_verified": False,
@@ -165,10 +165,10 @@ async def users_with_same_role_50_users(db_session):
     users = []
     for _ in range(50):
         user_data = {
-            "nickname": fake.user_name(),
+            "nickname": fake.unique.user_name(),
             "first_name": fake.first_name(),
             "last_name": fake.last_name(),
-            "email": fake.email(),
+            "email": fake.unique.email(),
             "hashed_password": fake.password(),
             "role": UserRole.AUTHENTICATED,
             "email_verified": False,
