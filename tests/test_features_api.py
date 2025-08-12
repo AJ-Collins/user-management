@@ -2,7 +2,7 @@ import pytest
 from httpx import AsyncClient
 from uuid import UUID
 from app.main import app
-from app.models import User
+from app.models.user_model import User
 
 # ---------- Fixtures ----------
 
@@ -110,7 +110,7 @@ async def test_upgrade_professional_status_unauthorized(test_user, auth_headers)
 @pytest.mark.asyncio
 async def test_upgrade_professional_status_invalid_payload(test_user, admin_auth_headers):
     async with AsyncClient(app=app, base_url="http://testserver") as client:
-        payload = {"is_professional": "yes"}  # Invalid type
+        payload = {"is_professional": "yes"}
         response = await client.patch(
             f"/users/{test_user.id}/professional-status",
             json=payload,
