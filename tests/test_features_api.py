@@ -7,6 +7,8 @@ from app.schemas.user_schemas import UserResponse
 import bcrypt
 from fastapi import status
 from unittest.mock import AsyncMock
+from sqlalchemy.ext.asyncio import async_scoped_session, AsyncSession
+import asyncio
 
 # ---------- Fixtures ----------
 
@@ -109,6 +111,15 @@ async def test_update_profile_with_all_fields(test_user, auth_headers):
         assert "links" in data
 
 @pytest.mark.asyncio
+async def test_update_profile_invalid_payload(test_user, auth_headers):
+    """Test update with invalid payload (e.g., incorrect email format)."""
+    async with AsyncClient(app=app, base_url="http://testserver") as client:
+        payload = {"email": "invalid-email"}  # Invalid email format
+        response = await client.patch("/users/me", json=payload, headers=auth_headers)
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert "detail" in response.json()
+
+@pytest.mark.asyncio
 async def test_upgrade_professional_status_success(test_user, admin_auth_headers, email_service):
     """Test successful upgrade of a user's professional status by an admin."""
     async with AsyncClient(app=app, base_url="http://testserver") as client:
@@ -142,7 +153,7 @@ async def test_upgrade_professional_status_unauthorized(test_user, auth_headers)
 async def test_upgrade_professional_status_invalid_payload(test_user, admin_auth_headers):
     """Test attempt to upgrade professional status with invalid payload."""
     async with AsyncClient(app=app, base_url="http://testserver") as client:
-        payload = {"is_professional": "yes"}
+        payload = {"is_professional": "yes"}  # Invalid type
         response = await client.patch(
             f"/users/{test_user.id}/professional-status",
             json=payload,

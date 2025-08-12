@@ -36,6 +36,7 @@ from app.services.email_service import EmailService
 from app.schemas.user_schemas import UserUpdate, UserResponse, ProfessionalStatusUpdate
 import logging
 from typing import List
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -209,20 +210,21 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_db
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_db)):
     try:
         user = await UserService.login_user(session, form_data.username, form_data.password)
-
+        if user.is_locked:
+            raise HTTPException(status_code=400, detail="Account is locked due to too many failed login attempts.")
+        if not user.email_verified:
+            raise HTTPException(status_code=400, detail="Email not verified.")
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = create_access_token(
             data={"sub": user.email, "role": str(user.role.name)},
             expires_delta=access_token_expires
         )
         return {"access_token": access_token, "token_type": "bearer"}
-
     except ValueError as ve:
         msg = str(ve)
-        if msg in ["Incorrect email or password."]:
+        if msg == "Incorrect email or password.":
             raise HTTPException(status_code=401, detail=msg)
-        else:
-            raise HTTPException(status_code=400, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
 
 
 @router.get("/verify-email/{user_id}/{token}", status_code=status.HTTP_200_OK, name="verify_email", tags=["Login and Registration"])
@@ -244,27 +246,14 @@ async def update_current_user(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    """
-    Update the authenticated user's profile fields. Partial update allowed.
-    """
-    update_data = payload.model_dump(exclude_unset=True)
-
-    # Prevent regular users from changing professional status directly
-    update_data.pop("is_professional", None)
-    update_data.pop("professional_status_updated_at", None)
-    
-    updated_user = await UserService.update(db, current_user.id, update_data)
-    if not updated_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     try:
-        resp = UserResponse.model_validate(updated_user)
-        if hasattr(resp, "model_dump"):
-            user_dict = resp.model_dump()
-            user_dict["links"] = create_user_links(updated_user.id, request)
-            return user_dict
-    except Exception:
-        # fallback to manual construction similar to other endpoints in your repo
-        return UserResponse.model_construct(
+        update_data = payload.model_dump(exclude_unset=True)
+        update_data.pop("is_professional", None)
+        update_data.pop("professional_status_updated_at", None)
+        updated_user = await UserService.update(db, current_user.id, update_data)
+        if not updated_user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        resp = UserResponse.model_construct(
             id=updated_user.id,
             nickname=updated_user.nickname,
             first_name=updated_user.first_name,
@@ -282,6 +271,10 @@ async def update_current_user(
             professional_status_updated_at=updated_user.professional_status_updated_at,
             links=create_user_links(updated_user.id, request),
         )
+        return resp
+    except Exception as e:
+        logger.error(f"Error updating user profile: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.patch("/users/{user_id}/professional-status", response_model=UserResponse, name="set_professional_status", tags=["User Profile Requires (Admin or Manager Roles)"])
 async def set_professional_status(
@@ -290,36 +283,20 @@ async def set_professional_status(
     request: Request,
     db: AsyncSession = Depends(get_db),
     email_service: EmailService = Depends(get_email_service),
-    current_user = Depends(require_role(["ADMIN", "MANAGER"])),
+    current_user=Depends(require_role(["ADMIN", "MANAGER"])),
 ):
-    """
-    Managers/Admins can set or unset a user's professional status.
-    Body: { "is_professional": true }
-    """
-    status_value = bool(payload.is_professional)
-    updated_user = await UserService.set_professional_status(db, user_id, status_value)
-    if not updated_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    
-    # Send notification email only if upgrading
-    if status_value:
-        try:
-            await email_service.send_professional_status_upgrade_email(
-                updated_user,
-                upgraded_by=getattr(current_user, "email", None)
-            )
-        except Exception as e:
-            logging.getLogger(__name__).warning(
-                f"Failed to send professional status email to {updated_user.email}: {e}"
-            )
-
-    # Return same pattern as above
     try:
-        resp = UserResponse.model_validate(updated_user)
-        user_dict = resp.model_dump()
-        user_dict["links"] = create_user_links(updated_user.id, request)
-        return user_dict
-    except Exception:
+        status_value = bool(payload.is_professional)
+        updated_user = await UserService.set_professional_status(db, user_id, status_value)
+        if not updated_user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if status_value:
+            try:
+                await email_service.send_professional_status_upgrade_email(
+                    updated_user, upgraded_by=getattr(current_user, "email", None)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send professional status email: {str(e)}")
         return UserResponse.model_construct(
             id=updated_user.id,
             nickname=updated_user.nickname,
@@ -338,6 +315,9 @@ async def set_professional_status(
             professional_status_updated_at=updated_user.professional_status_updated_at,
             links=create_user_links(updated_user.id, request),
         )
+    except Exception as e:
+        logger.error(f"Error setting professional status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     
 @router.get("/users/search", response_model=List[UserResponse], tags=["User Management"])
 async def search_users_for_upgrade(
@@ -345,8 +325,9 @@ async def search_users_for_upgrade(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(require_role(["ADMIN", "MANAGER"]))
 ):
-    """
-    Admins can search users for professional status upgrade.
-    """
-    users = await UserService.search_users(db, query)
-    return [UserResponse.model_validate(u) for u in users]
+    try:
+        users = await UserService.search_users(db, query)
+        return [UserResponse.model_validate(u) for u in users]
+    except Exception as e:
+        logger.error(f"Error searching users: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
