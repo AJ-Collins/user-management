@@ -36,8 +36,15 @@ from app.utils.security import hash_password
 from app.utils.template_manager import TemplateManager
 from app.services.email_service import EmailService
 from app.services.jwt_service import create_access_token
+from app.dependencies import get_current_user
+
 
 fake = Faker()
+
+def override_get_current_user():
+    return User(id="test-user-id", role="ADMIN", email="admin@example.com")
+
+app.dependency_overrides[get_current_user] = override_get_current_user
 
 settings = get_settings()
 TEST_DATABASE_URL = settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
