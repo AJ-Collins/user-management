@@ -1,5 +1,5 @@
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from uuid import UUID
 from app.main import app
 from app.models.user_model import User
@@ -13,7 +13,7 @@ import asyncio
 # ---------- Fixtures ----------
 
 @pytest.fixture
-async def test_user(db_session):
+async def test_user(db_session: AsyncSession):
     """Fixture to create a test user in the database."""
     user = User(
         id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -31,6 +31,8 @@ async def test_user(db_session):
     await db_session.commit()
     await db_session.refresh(user)
     yield user
+    await db_session.delete(user)
+    await db_session.commit()
 
 @pytest.fixture
 async def auth_headers(monkeypatch, test_user):
@@ -68,13 +70,13 @@ async def email_service(monkeypatch):
 @pytest.mark.asyncio
 async def test_update_profile_success(test_user, auth_headers):
     """Test successful partial update of a user's profile."""
-    async with AsyncClient(app=app, base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         payload = {
             "first_name": "UpdatedName",
             "bio": "New bio content"
         }
         response = await client.patch("/users/me", json=payload, headers=auth_headers)
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
         data = response.json()
         assert data["first_name"] == "UpdatedName"
         assert data["bio"] == "New bio content"
@@ -84,7 +86,7 @@ async def test_update_profile_success(test_user, auth_headers):
 @pytest.mark.asyncio
 async def test_update_profile_with_all_fields(test_user, auth_headers):
     """Test successful update of all allowed user profile fields."""
-    async with AsyncClient(app=app, base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         payload = {
             "email": "john.doe@example.com",
             "nickname": "john_doe123",
@@ -97,7 +99,7 @@ async def test_update_profile_with_all_fields(test_user, auth_headers):
             "role": "AUTHENTICATED"
         }
         response = await client.patch("/users/me", json=payload, headers=auth_headers)
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
         data = response.json()
         assert data["email"] == "john.doe@example.com"
         assert data["nickname"] == "john_doe123"
@@ -113,23 +115,23 @@ async def test_update_profile_with_all_fields(test_user, auth_headers):
 @pytest.mark.asyncio
 async def test_update_profile_invalid_payload(test_user, auth_headers):
     """Test update with invalid payload (e.g., incorrect email format)."""
-    async with AsyncClient(app=app, base_url="http://testserver") as client:
-        payload = {"email": "invalid-email"}  # Invalid email format
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        payload = {"email": "invalid-email"}
         response = await client.patch("/users/me", json=payload, headers=auth_headers)
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, f"Expected 422, got {response.status_code}: {response.text}"
         assert "detail" in response.json()
 
 @pytest.mark.asyncio
 async def test_upgrade_professional_status_success(test_user, admin_auth_headers, email_service):
     """Test successful upgrade of a user's professional status by an admin."""
-    async with AsyncClient(app=app, base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         payload = {"is_professional": True}
         response = await client.patch(
             f"/users/{test_user.id}/professional-status",
             json=payload,
             headers=admin_auth_headers,
         )
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
         data = response.json()
         assert data["is_professional"] is True
         assert data["id"] == str(test_user.id)
@@ -139,35 +141,35 @@ async def test_upgrade_professional_status_success(test_user, admin_auth_headers
 @pytest.mark.asyncio
 async def test_upgrade_professional_status_unauthorized(test_user, auth_headers):
     """Test unauthorized attempt to upgrade professional status with non-admin role."""
-    async with AsyncClient(app=app, base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         payload = {"is_professional": True}
         response = await client.patch(
             f"/users/{test_user.id}/professional-status",
             json=payload,
             headers=auth_headers,
         )
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.status_code == status.HTTP_403_FORBIDDEN, f"Expected 403, got {response.status_code}: {response.text}"
         assert "detail" in response.json()
 
 @pytest.mark.asyncio
 async def test_upgrade_professional_status_invalid_payload(test_user, admin_auth_headers):
     """Test attempt to upgrade professional status with invalid payload."""
-    async with AsyncClient(app=app, base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         payload = {"is_professional": "yes"}  # Invalid type
         response = await client.patch(
             f"/users/{test_user.id}/professional-status",
             json=payload,
             headers=admin_auth_headers,
         )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, f"Expected 422, got {response.status_code}: {response.text}"
         assert "detail" in response.json()
 
 @pytest.mark.asyncio
 async def test_search_users_success(admin_auth_headers, test_user):
     """Test successful search for users by an admin."""
-    async with AsyncClient(app=app, base_url="http://testserver") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.get("/users/search?query=tester", headers=admin_auth_headers)
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
         data = response.json()
         assert isinstance(data, list)
         assert len(data) >= 1
