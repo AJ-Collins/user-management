@@ -237,11 +237,13 @@ class UserService:
         return False
     
     @classmethod
-    async def set_professional_status(cls, session: AsyncSession, user_id: UUID, status: bool) -> Optional[User]:
+    async def set_professional_status(cls, session: AsyncSession, user_id: UUID, status: bool, admin: User, email_service: EmailService) -> Optional[User]:
         """
         Set or unset professional status for a user and update the timestamp.
         """
         try:
+            if admin.role != UserRole.ADMIN:
+                raise ValueError("Only admins can set professional status")
             user = await cls.get_by_id(session, user_id)
             if not user:
                 return None
@@ -251,6 +253,9 @@ class UserService:
             session.add(user)
             await session.commit()
             await session.refresh(user)
+            if user.is_professional:
+                await email_service.send_professional_status_upgrade_email(user.email)
+            return user
             return user
         except SQLAlchemyError as e:
             logger.error(f"Failed to set professional status for {user_id}: {e}")

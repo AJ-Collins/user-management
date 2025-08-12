@@ -35,3 +35,11 @@ class EmailService:
             "verification_url": verification_url,
             "email": user.email
         }, 'email_verification')
+
+    async def send_professional_status_upgrade_email(self, user: User, upgraded_by: str | None = None):
+        context = {
+            "name": user.first_name or user.nickname or user.email,
+            "email": user.email,
+            "upgraded_by": upgraded_by or ""
+        }
+        await self.send_user_email(context, 'professional_status_upgrade')

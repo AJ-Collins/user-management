@@ -107,26 +107,23 @@ async def test_update_profile_invalid_payload(db_session: AsyncSession, test_use
     updated_user = await UserService.update(db_session, test_user.id, user_data)
     assert updated_user is None
 
-async def test_upgrade_professional_status_success(db_session: AsyncSession, test_user: User):
-    """Test successful upgrade of a user's professional status."""
-    updated_user = await UserService.set_professional_status(db_session, test_user.id, True)
+async def test_upgrade_professional_status_success(db_session: AsyncSession, test_user: User, admin_user: User, email_service: AsyncMock):
+    """Test successful upgrade of a user's professional status by an admin."""
+    updated_user = await UserService.set_professional_status(db_session, test_user.id, True, admin_user, email_service)
     assert updated_user is not None
     assert updated_user.is_professional is True
     assert updated_user.id == test_user.id
     assert updated_user.professional_status_updated_at is not None
+    email_service.send_professional_status_upgrade_email.assert_called_once()
 
-async def test_upgrade_professional_status_unauthorized(db_session: AsyncSession, test_user: User):
-    """Test setting professional status (no admin check in service, so same as success case)."""
-    # Note: UserService.set_professional_status does not check for admin privileges,
-    # so this test is similar to the success case. Consider adding authorization in the service.
-    updated_user = await UserService.set_professional_status(db_session, test_user.id, True)
-    assert updated_user is not None
-    assert updated_user.is_professional is True
-    assert updated_user.id == test_user.id
+async def test_upgrade_professional_status_unauthorized(db_session: AsyncSession, test_user: User, email_service: AsyncMock):
+    """Test unauthorized attempt to upgrade professional status with non-admin role."""
+    with pytest.raises(ValueError, match="Only admins can set professional status"):
+        await UserService.set_professional_status(db_session, test_user.id, True, test_user, email_service)
 
-async def test_upgrade_professional_status_invalid_payload(db_session: AsyncSession, test_user: User):
+async def test_upgrade_professional_status_invalid_payload(db_session: AsyncSession, test_user: User, admin_user: User, email_service: AsyncMock):
     """Test setting professional status with valid input (invalid payload not possible due to type hint)."""
-    updated_user = await UserService.set_professional_status(db_session, test_user.id, False)
+    updated_user = await UserService.set_professional_status(db_session, test_user.id, False, admin_user, email_service)
     assert updated_user is not None
     assert updated_user.is_professional is False
 

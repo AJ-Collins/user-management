@@ -41,6 +41,7 @@ pydantic-settings==2.2.1
 pydantic-settings>=2.0
 pydantic_core==2.16.3
 PyMySQL==1.1.1
+python-multipart>=0.0.9
 pypng==0.20220715.0
 pytest==8.1.1
 pytest-asyncio==0.23.6
