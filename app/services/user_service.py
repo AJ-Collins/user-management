@@ -265,11 +265,13 @@ class UserService:
             return None
         
     @classmethod
-    async def search_users(db: AsyncSession, query: str):
+    async def search_users(db: AsyncSession, query: str, admin: User = None):
         """
         Search users by first name, last name, or email.
         Returns a list of matching User objects.
         """
+        if admin and admin.role != UserRole.ADMIN:
+            raise ValueError("Only admins can search users")
         stmt = (
             select(User)
             .where(

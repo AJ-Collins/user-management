@@ -127,9 +127,9 @@ async def test_upgrade_professional_status_invalid_payload(db_session: AsyncSess
     assert updated_user is not None
     assert updated_user.is_professional is False
 
-async def test_search_users_success(db_session: AsyncSession, test_user: User):
+async def test_search_users_success(db_session: AsyncSession, test_user: User, admin_user: User):
     """Test successful search for users by first name."""
-    users = await UserService.search_users(db_session, "Test")
+    users = await UserService.search_users(db_session, "Test", admin_user)
     assert isinstance(users, list)
     assert len(users) >= 1
     assert any(user.first_name == "Test" for user in users)
