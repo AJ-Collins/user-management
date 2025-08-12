@@ -26,6 +26,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, scoped_session
 from faker import Faker
+from uuid import UUID
+import bcrypt
 
 # Application-specific imports
 from app.main import app
@@ -92,22 +94,19 @@ async def db_session(setup_database):
 
 @pytest.fixture(scope="function")
 async def locked_user(db_session):
-    unique_email = fake.email()
-    user_data = {
-        "nickname": fake.user_name(),
-        "first_name": fake.first_name(),
-        "last_name": fake.last_name(),
-        "email": unique_email,
-        "hashed_password": hash_password("MySuperPassword$1234"),
-        "role": UserRole.AUTHENTICATED,
-        "email_verified": False,
-        "is_locked": True,
-        "failed_login_attempts": settings.max_login_attempts,
-    }
-    user = User(**user_data)
+    user = User(
+        id=UUID("33333333-3333-3333-3333-333333333333"),
+        email="locked@example.com",
+        nickname="mpowell",
+        hashed_password=bcrypt.hashpw("MySuperPassword$1234".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+        is_locked=True,
+        email_verified=True,
+        role="AUTHENTICATED"
+    )
     db_session.add(user)
     await db_session.commit()
-    return user
+    await db_session.refresh(user)
+    yield user
 
 @pytest.fixture(scope="function")
 async def user(db_session):
