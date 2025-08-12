@@ -115,7 +115,7 @@ async def test_upgrade_professional_status_success(db_session: AsyncSession, tes
     assert updated_user.id == test_user.id
     assert updated_user.professional_status_updated_at is not None
 
-async def test_upgrade_professional_status_unauthorized(db_session: AsyncSession, test_user: User, admin_user: User):
+async def test_upgrade_professional_status_unauthorized(db_session: AsyncSession, test_user: User):
     """Test setting professional status (no admin check in service, so same as success case)."""
     # Note: UserService.set_professional_status does not check for admin privileges,
     # so this test is similar to the success case. Consider adding authorization in the service.
@@ -125,9 +125,7 @@ async def test_upgrade_professional_status_unauthorized(db_session: AsyncSession
     assert updated_user.id == test_user.id
 
 async def test_upgrade_professional_status_invalid_payload(db_session: AsyncSession, test_user: User):
-    """Test setting professional status with invalid input (handled by type hint)."""
-    # Note: The method enforces bool via type hint, so we can't pass a non-bool.
-    # Test with a valid bool to ensure the method works as expected.
+    """Test setting professional status with valid input (invalid payload not possible due to type hint)."""
     updated_user = await UserService.set_professional_status(db_session, test_user.id, False)
     assert updated_user is not None
     assert updated_user.is_professional is False
