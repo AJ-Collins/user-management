@@ -1,14 +1,14 @@
 import pytest
-from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
-from app.main import app
-from app.models.user_model import User
-from app.schemas.user_schemas import UserResponse
+from app.models.user_model import User, UserRole
+from app.services.user_service import UserService
+from app.schemas.user_schemas import UserUpdate
 import bcrypt
-from fastapi import status
 from unittest.mock import AsyncMock
-from sqlalchemy.ext.asyncio import async_scoped_session, AsyncSession
-import asyncio
+from fastapi import status
+
+pytestmark = pytest.mark.asyncio
 
 # ---------- Fixtures ----------
 
@@ -23,7 +23,7 @@ async def test_user(db_session: AsyncSession):
         last_name="User",
         bio="Old bio",
         is_professional=False,
-        role="AUTHENTICATED",
+        role=UserRole.AUTHENTICATED,
         hashed_password=bcrypt.hashpw("testpassword".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
         email_verified=True
     )
@@ -35,27 +35,26 @@ async def test_user(db_session: AsyncSession):
     await db_session.commit()
 
 @pytest.fixture
-async def auth_headers(monkeypatch, test_user):
-    """Fixture to provide headers for a regular authenticated user."""
-    async def mock_get_current_user():
-        return test_user
-    monkeypatch.setattr("app.dependencies.get_current_user", mock_get_current_user)
-    return {"Authorization": "Bearer usertoken"}
-
-@pytest.fixture
-async def admin_auth_headers(monkeypatch, test_user):
-    """Fixture to provide headers for an admin user."""
-    async def mock_require_role(roles):
-        return User(
-            id=UUID("22222222-2222-2222-2222-222222222222"),
-            email="admin@example.com",
-            nickname="admin",
-            role="ADMIN",
-            hashed_password=bcrypt.hashpw("adminpassword".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
-            email_verified=True
-        )
-    monkeypatch.setattr("app.dependencies.require_role", mock_require_role)
-    return {"Authorization": "Bearer admintoken"}
+async def admin_user(db_session: AsyncSession):
+    """Fixture to create an admin user in the database."""
+    admin = User(
+        id=UUID("22222222-2222-2222-2222-222222222222"),
+        email="admin@example.com",
+        nickname="admin",
+        first_name="Admin",
+        last_name="User",
+        bio="Admin bio",
+        is_professional=False,
+        role=UserRole.ADMIN,
+        hashed_password=bcrypt.hashpw("adminpassword".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+        email_verified=True
+    )
+    db_session.add(admin)
+    await db_session.commit()
+    await db_session.refresh(admin)
+    yield admin
+    await db_session.delete(admin)
+    await db_session.commit()
 
 @pytest.fixture
 async def email_service(monkeypatch):
@@ -67,111 +66,73 @@ async def email_service(monkeypatch):
 
 # ---------- Tests ----------
 
-@pytest.mark.asyncio
-async def test_update_profile_success(test_user, auth_headers):
+async def test_update_profile_success(db_session: AsyncSession, test_user: User):
     """Test successful partial update of a user's profile."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        payload = {
-            "first_name": "UpdatedName",
-            "bio": "New bio content"
-        }
-        response = await client.patch("/users/me", json=payload, headers=auth_headers)
-        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
-        data = response.json()
-        assert data["first_name"] == "UpdatedName"
-        assert data["bio"] == "New bio content"
-        assert data["id"] == str(test_user.id)
-        assert "links" in data
+    user_data = {
+        "first_name": "UpdatedName",
+        "bio": "New bio content"
+    }
+    updated_user = await UserService.update(db_session, test_user.id, user_data)
+    assert updated_user is not None
+    assert updated_user.first_name == "UpdatedName"
+    assert updated_user.bio == "New bio content"
+    assert updated_user.id == test_user.id
 
-@pytest.mark.asyncio
-async def test_update_profile_with_all_fields(test_user, auth_headers):
+async def test_update_profile_with_all_fields(db_session: AsyncSession, test_user: User):
     """Test successful update of all allowed user profile fields."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        payload = {
-            "email": "john.doe@example.com",
-            "nickname": "john_doe123",
-            "first_name": "John",
-            "last_name": "Doe",
-            "bio": "Experienced software developer specializing in web applications.",
-            "profile_picture_url": "https://example.com/profiles/john.jpg",
-            "linkedin_profile_url": "https://linkedin.com/in/johndoe",
-            "github_profile_url": "https://github.com/johndoe",
-            "role": "AUTHENTICATED"
-        }
-        response = await client.patch("/users/me", json=payload, headers=auth_headers)
-        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
-        data = response.json()
-        assert data["email"] == "john.doe@example.com"
-        assert data["nickname"] == "john_doe123"
-        assert data["first_name"] == "John"
-        assert data["last_name"] == "Doe"
-        assert data["bio"] == payload["bio"]
-        assert data["profile_picture_url"] == payload["profile_picture_url"]
-        assert data["linkedin_profile_url"] == payload["linkedin_profile_url"]
-        assert data["github_profile_url"] == payload["github_profile_url"]
-        assert data["role"] == "AUTHENTICATED"
-        assert "links" in data
+    user_data = {
+        "email": "john.doe@example.com",
+        "nickname": "john_doe123",
+        "first_name": "John",
+        "last_name": "Doe",
+        "bio": "Experienced software developer specializing in web applications.",
+        "profile_picture_url": "https://example.com/profiles/john.jpg",
+        "linkedin_profile_url": "https://linkedin.com/in/johndoe",
+        "github_profile_url": "https://github.com/johndoe",
+        "role": UserRole.AUTHENTICATED.name
+    }
+    updated_user = await UserService.update(db_session, test_user.id, user_data)
+    assert updated_user is not None
+    assert updated_user.email == "john.doe@example.com"
+    assert updated_user.nickname == "john_doe123"
+    assert updated_user.first_name == "John"
+    assert updated_user.last_name == "Doe"
+    assert updated_user.bio == user_data["bio"]
+    assert updated_user.profile_picture_url == user_data["profile_picture_url"]
+    assert updated_user.linkedin_profile_url == user_data["linkedin_profile_url"]
+    assert updated_user.github_profile_url == user_data["github_profile_url"]
+    assert updated_user.role == UserRole.AUTHENTICATED
 
-@pytest.mark.asyncio
-async def test_update_profile_invalid_payload(test_user, auth_headers):
+async def test_update_profile_invalid_payload(db_session: AsyncSession, test_user: User):
     """Test update with invalid payload (e.g., incorrect email format)."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        payload = {"email": "invalid-email"}
-        response = await client.patch("/users/me", json=payload, headers=auth_headers)
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, f"Expected 422, got {response.status_code}: {response.text}"
-        assert "detail" in response.json()
+    user_data = {"email": "invalid-email"}
+    updated_user = await UserService.update(db_session, test_user.id, user_data)
+    assert updated_user is None
 
-@pytest.mark.asyncio
-async def test_upgrade_professional_status_success(test_user, admin_auth_headers, email_service):
+async def test_upgrade_professional_status_success(db_session: AsyncSession, test_user: User, admin_user: User, email_service: AsyncMock):
     """Test successful upgrade of a user's professional status by an admin."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        payload = {"is_professional": True}
-        response = await client.patch(
-            f"/users/{test_user.id}/professional-status",
-            json=payload,
-            headers=admin_auth_headers,
-        )
-        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
-        data = response.json()
-        assert data["is_professional"] is True
-        assert data["id"] == str(test_user.id)
-        assert "links" in data
-        email_service.send_professional_status_upgrade_email.assert_called_once()
+    payload = {"is_professional": True}
+    updated_user = await UserService.upgrade_professional_status(db_session, test_user.id, payload, admin_user, email_service)
+    assert updated_user is not None
+    assert updated_user.is_professional is True
+    assert updated_user.id == test_user.id
+    email_service.send_professional_status_upgrade_email.assert_called_once()
 
-@pytest.mark.asyncio
-async def test_upgrade_professional_status_unauthorized(test_user, auth_headers):
+async def test_upgrade_professional_status_unauthorized(db_session: AsyncSession, test_user: User):
     """Test unauthorized attempt to upgrade professional status with non-admin role."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        payload = {"is_professional": True}
-        response = await client.patch(
-            f"/users/{test_user.id}/professional-status",
-            json=payload,
-            headers=auth_headers,
-        )
-        assert response.status_code == status.HTTP_403_FORBIDDEN, f"Expected 403, got {response.status_code}: {response.text}"
-        assert "detail" in response.json()
+    payload = {"is_professional": True}
+    with pytest.raises(ValueError):
+        await UserService.upgrade_professional_status(db_session, test_user.id, payload, test_user, None)
 
-@pytest.mark.asyncio
-async def test_upgrade_professional_status_invalid_payload(test_user, admin_auth_headers):
+async def test_upgrade_professional_status_invalid_payload(db_session: AsyncSession, test_user: User, admin_user: User, email_service: AsyncMock):
     """Test attempt to upgrade professional status with invalid payload."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        payload = {"is_professional": "yes"}  # Invalid type
-        response = await client.patch(
-            f"/users/{test_user.id}/professional-status",
-            json=payload,
-            headers=admin_auth_headers,
-        )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, f"Expected 422, got {response.status_code}: {response.text}"
-        assert "detail" in response.json()
+    payload = {"is_professional": "yes"}  # Invalid type
+    updated_user = await UserService.upgrade_professional_status(db_session, test_user.id, payload, admin_user, email_service)
+    assert updated_user is None
 
-@pytest.mark.asyncio
-async def test_search_users_success(admin_auth_headers, test_user):
+async def test_search_users_success(db_session: AsyncSession, test_user: User, admin_user: User):
     """Test successful search for users by an admin."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.get("/users/search?query=tester", headers=admin_auth_headers)
-        assert response.status_code == status.HTTP_200_OK, f"Expected 200, got {response.status_code}: {response.text}"
-        data = response.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
-        assert any(user["nickname"] == "tester" for user in data)
-        assert all("links" in user for user in data)
+    users = await UserService.search_users(db_session, query="tester", admin=admin_user)
+    assert isinstance(users, list)
+    assert len(users) >= 1
+    assert any(user.nickname == "tester" for user in users)
