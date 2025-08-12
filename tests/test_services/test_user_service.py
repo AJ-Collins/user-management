@@ -225,4 +225,3 @@ async def test_create_user_rejects_duplicate_email(db_session, email_service):
     }
     with pytest.raises(ValueError):
         await UserService.create(db_session, dup_data, email_service)
-

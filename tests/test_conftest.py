@@ -4,8 +4,6 @@ from builtins import len
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.future import select
-from uuid import UUID
-import bcrypt
 
 from app.models.user_model import User, UserRole
 from app.utils.security import verify_password
@@ -21,20 +19,10 @@ async def test_user_creation(db_session, verified_user):
 
 # Apply similar corrections to other test functions
 @pytest.mark.asyncio
-async def locked_user(db_session):
-    user = User(
-        id=UUID("33333333-3333-3333-3333-333333333333"),
-        email="locked@example.com",
-        nickname="mpowell",
-        hashed_password=bcrypt.hashpw("MySuperPassword$1234".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
-        is_locked=True,
-        email_verified=True,  # Ensure email is verified
-        role="AUTHENTICATED"
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    yield user
+async def test_locked_user(db_session, locked_user):
+    result = await db_session.execute(select(User).filter_by(email=locked_user.email))
+    stored_user = result.scalars().first()
+    assert stored_user.is_locked
 
 @pytest.mark.asyncio
 async def test_verified_user(db_session, verified_user):

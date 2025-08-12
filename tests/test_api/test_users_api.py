@@ -2,7 +2,6 @@ from builtins import str
 import pytest
 from httpx import AsyncClient
 from app.main import app
-from fastapi import status
 from app.models.user_model import User, UserRole
 from app.utils.nickname_gen import generate_nickname
 from app.utils.security import hash_password
@@ -67,11 +66,11 @@ async def test_create_user_duplicate_email(async_client, verified_user):
     user_data = {
         "email": verified_user.email,
         "password": "AnotherPassword123!",
-        "role": "ADMIN"
+        "role": UserRole.ADMIN.name
     }
     response = await async_client.post("/register/", json=user_data)
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.json()["detail"] == "Email already exists"
+    assert response.status_code == 400
+    assert "Email already exists" in response.json().get("detail", "")
 
 @pytest.mark.asyncio
 async def test_create_user_invalid_email(async_client):
@@ -145,6 +144,7 @@ async def test_login_locked_user(async_client, locked_user):
     response = await async_client.post("/login/", data=form_data, headers={
         "Content-Type": "application/x-www-form-urlencoded"
     })
+
     assert response.status_code == 400
     assert response.json()["detail"] == "Account is locked due to too many failed login attempts."
 
