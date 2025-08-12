@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, null, update, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.dependencies import get_email_service, get_settings
+from app.dependencies import get_settings
 from app.models.user_model import User
 from app.schemas.user_schemas import UserCreate, UserUpdate
 from app.utils.nickname_gen import generate_nickname
