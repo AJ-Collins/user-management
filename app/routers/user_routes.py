@@ -36,6 +36,8 @@ from app.services.email_service import EmailService
 from app.schemas.user_schemas import UserUpdate, UserResponse, ProfessionalStatusUpdate
 import logging
 from typing import List
+from app.models.user_model import User
+
 logger = logging.getLogger(__name__)
 
 
