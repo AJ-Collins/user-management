@@ -199,12 +199,19 @@ async def list_users(
     )
 
 
-@router.post("/register/", response_model=UserResponse, tags=["Login and Registration"])
+@router.post("/register/", response_model=UserResponse, status_code=201, tags=["Authentication"], name="register_user")
 async def register(user_data: UserCreate, session: AsyncSession = Depends(get_db), email_service: EmailService = Depends(get_email_service)):
-    user = await UserService.register_user(session, user_data.model_dump(), email_service)
-    if user:
-        return user
-    raise HTTPException(status_code=400, detail="Email already exists")
+    try:
+        user = await UserService.register_user(session, user_data.model_dump(), email_service)
+        if user:
+            return UserResponse.model_validate(user)
+    except ValueError as e:
+        if "already exists" in str(e).lower():
+            raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Registration failed")
 
 @router.post("/login/", response_model=TokenResponse, tags=["Login and Registration"])
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_db)):
@@ -244,16 +251,22 @@ async def update_current_user(
     payload: UserUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # Add type annotation
 ):
     try:
+        print(f"Updating profile for user: {current_user.email}")
+        print(f"Update payload: {payload.model_dump(exclude_unset=True)}")
+        
         update_data = payload.model_dump(exclude_unset=True)
         update_data.pop("is_professional", None)
         update_data.pop("professional_status_updated_at", None)
+        
         updated_user = await UserService.update(db, current_user.id, update_data)
         if not updated_user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-        resp = UserResponse.model_construct(
+            
+        # Ensure all fields are properly accessed
+        resp = UserResponse(
             id=updated_user.id,
             nickname=updated_user.nickname,
             first_name=updated_user.first_name,
@@ -267,14 +280,16 @@ async def update_current_user(
             last_login_at=updated_user.last_login_at,
             created_at=updated_user.created_at,
             updated_at=updated_user.updated_at,
-            is_professional=updated_user.is_professional,
-            professional_status_updated_at=updated_user.professional_status_updated_at,
+            is_professional=getattr(updated_user, 'is_professional', False),
+            professional_status_updated_at=getattr(updated_user, 'professional_status_updated_at', None),
             links=create_user_links(updated_user.id, request),
         )
         return resp
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error updating user profile: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Error updating user profile: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.patch("/users/{user_id}/professional-status", response_model=UserResponse, name="set_professional_status", tags=["User Profile Requires (Admin or Manager Roles)"])
 async def set_professional_status(
