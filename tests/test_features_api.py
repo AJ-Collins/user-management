@@ -5,6 +5,11 @@ from app.models.user_model import User, UserRole
 from app.services.user_service import UserService
 import bcrypt
 from unittest.mock import AsyncMock
+import logging
+
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 pytestmark = pytest.mark.asyncio
 
@@ -129,6 +134,7 @@ async def test_upgrade_professional_status_invalid_payload(db_session: AsyncSess
 
 async def test_search_users_success(db_session: AsyncSession, test_user: User, admin_user: User):
     """Test successful search for users by first name."""
+    logger.debug(f"Calling UserService.search_users with db_session={db_session}, query='Test', admin_user={admin_user}")
     users = await UserService.search_users(db_session, "Test", admin_user)
     assert isinstance(users, list)
     assert len(users) >= 1

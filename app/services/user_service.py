@@ -17,6 +17,7 @@ from app.models.user_model import UserRole
 import logging
 
 settings = get_settings()
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class UserService:
@@ -265,12 +266,14 @@ class UserService:
             return None
         
     @classmethod
-    async def search_users(db: AsyncSession, query: str, admin: User = None):
+    async def search_users(cls, db: AsyncSession, query: str, admin: User = None):
         """
         Search users by first name, last name, or email.
         Returns a list of matching User objects.
         """
+        logger.debug(f"search_users called with arguments: cls={cls}, db={db}, query={query}, admin={admin}")
         if admin and admin.role != UserRole.ADMIN:
+            logger.warning(f"Unauthorized search attempt by user: {admin.email if admin else 'None'}")
             raise ValueError("Only admins can search users")
         stmt = (
             select(User)
@@ -281,6 +284,8 @@ class UserService:
             )
             .order_by(User.first_name.asc())
         )
-
+        logger.debug(f"Executing SQL query: {stmt}")
         result = await db.execute(stmt)
-        return result.scalars().all()
+        users = result.scalars().all()
+        logger.debug(f"Search returned {len(users)} users")
+        return users
