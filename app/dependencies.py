@@ -7,14 +7,13 @@ from app.utils.template_manager import TemplateManager
 from app.services.email_service import EmailService
 from app.services.jwt_service import decode_token
 from settings.config import Settings
-from fastapi import Depends
-from app.dependencies import get_db, get_settings
 from jose import JWTError, jwt
 from app.models.user_model import User
 from uuid import UUID
 from app.services.user_service import UserService
 
-settings = get_settings()
+# Initialize settings and OAuth2 scheme
+settings = Settings()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 def get_settings() -> Settings:
@@ -33,9 +32,6 @@ async def get_db() -> AsyncSession:
             yield session
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-        
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
     credentials_exception = HTTPException(

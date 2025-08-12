@@ -14,10 +14,8 @@ Fixtures:
 """
 
 # Standard library imports
-from builtins import Exception, range, str
+from builtins import Exception, str
 from datetime import timedelta
-from unittest.mock import AsyncMock, patch
-from uuid import uuid4
 
 # Third-party imports
 import pytest
@@ -27,7 +25,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, scoped_session
 from faker import Faker
 from uuid import UUID
-import bcrypt
+from unittest.mock import AsyncMock
 
 # Application-specific imports
 from app.main import app
@@ -47,15 +45,6 @@ engine = create_async_engine(TEST_DATABASE_URL, echo=settings.debug)
 AsyncTestingSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 AsyncSessionScoped = scoped_session(AsyncTestingSessionLocal)
 
-
-@pytest.fixture
-def email_service():
-    # Assuming the TemplateManager does not need any arguments for initialization
-    template_manager = TemplateManager()
-    email_service = EmailService(template_manager=template_manager)
-    return email_service
-
-
 # this is what creates the http client for your api tests
 @pytest.fixture(scope="function")
 async def async_client(db_session):
@@ -73,7 +62,7 @@ def initialize_database():
     except Exception as e:
         pytest.fail(f"Failed to initialize the database: {str(e)}")
 
-# this function setup and tears down (drops tales) for each test function, so you have a clean database for each test.
+# this function setup and tears down (drops tables) for each test function, so you have a clean database for each test.
 @pytest.fixture(scope="function", autouse=True)
 async def setup_database():
     async with engine.begin() as conn:
@@ -81,7 +70,7 @@ async def setup_database():
     yield
     async with engine.begin() as conn:
         # you can comment out this line during development if you are debugging a single test
-         await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 @pytest.fixture(scope="function")
@@ -98,10 +87,10 @@ async def locked_user(db_session):
         id=UUID("33333333-3333-3333-3333-333333333333"),
         email="locked@example.com",
         nickname="mpowell",
-        hashed_password=bcrypt.hashpw("MySuperPassword$1234".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+        hashed_password=hash_password("MySuperPassword$1234"),
         is_locked=True,
         email_verified=True,
-        role="AUTHENTICATED"
+        role=UserRole.AUTHENTICATED
     )
     db_session.add(user)
     await db_session.commit()
@@ -123,6 +112,7 @@ async def user(db_session):
     user = User(**user_data)
     db_session.add(user)
     await db_session.commit()
+    await db_session.refresh(user)
     return user
 
 @pytest.fixture(scope="function")
@@ -140,23 +130,7 @@ async def verified_user(db_session):
     user = User(**user_data)
     db_session.add(user)
     await db_session.commit()
-    return user
-
-@pytest.fixture(scope="function")
-async def unverified_user(db_session):
-    user_data = {
-        "nickname": fake.user_name(),
-        "first_name": fake.first_name(),
-        "last_name": fake.last_name(),
-        "email": fake.email(),
-        "hashed_password": hash_password("MySuperPassword$1234"),
-        "role": UserRole.AUTHENTICATED,
-        "email_verified": False,
-        "is_locked": False,
-    }
-    user = User(**user_data)
-    db_session.add(user)
-    await db_session.commit()
+    await db_session.refresh(user)
     return user
 
 @pytest.fixture(scope="function")
@@ -168,7 +142,7 @@ async def users_with_same_role_50_users(db_session):
             "first_name": fake.first_name(),
             "last_name": fake.last_name(),
             "email": fake.email(),
-            "hashed_password": fake.password(),
+            "hashed_password": hash_password(fake.password()),
             "role": UserRole.AUTHENTICATED,
             "email_verified": False,
             "is_locked": False,
@@ -177,6 +151,8 @@ async def users_with_same_role_50_users(db_session):
         db_session.add(user)
         users.append(user)
     await db_session.commit()
+    for user in users:
+        await db_session.refresh(user)
     return users
 
 @pytest.fixture
@@ -186,12 +162,13 @@ async def admin_user(db_session: AsyncSession):
         email="admin@example.com",
         first_name="John",
         last_name="Doe",
-        hashed_password="securepassword",
+        hashed_password=hash_password("securepassword"),
         role=UserRole.ADMIN,
         is_locked=False,
     )
     db_session.add(user)
     await db_session.commit()
+    await db_session.refresh(user)
     return user
 
 @pytest.fixture
@@ -201,12 +178,13 @@ async def manager_user(db_session: AsyncSession):
         first_name="John",
         last_name="Doe",
         email="manager_user@example.com",
-        hashed_password="securepassword",
+        hashed_password=hash_password("securepassword"),
         role=UserRole.MANAGER,
         is_locked=False,
     )
     db_session.add(user)
     await db_session.commit()
+    await db_session.refresh(user)
     return user
 
 # Configure a fixture for each type of user role you want to test
@@ -230,7 +208,8 @@ def user_token(user):
 def email_service():
     if settings.send_real_mail == 'true':
         # Return the real email service when specifically testing email functionality
-        return EmailService()
+        template_manager = TemplateManager()
+        return EmailService(template_manager=template_manager)
     else:
         # Otherwise, use a mock to prevent actual email sending
         mock_service = AsyncMock(spec=EmailService)
