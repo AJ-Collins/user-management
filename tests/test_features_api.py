@@ -3,11 +3,16 @@ from httpx import AsyncClient
 from uuid import UUID
 from app.main import app
 from app.models.user_model import User
+import bcrypt
 
 # ---------- Fixtures ----------
 
 @pytest.fixture
 async def test_user(db_session):
+
+    password = "testpassword".encode('utf-8')
+    hashed_password = bcrypt.hashpw(password, bcrypt.gensalt()).decode('utf-8')
+    
     user = User(
         id=UUID("11111111-1111-1111-1111-111111111111"),
         email="old@example.com",
@@ -16,7 +21,8 @@ async def test_user(db_session):
         last_name="User",
         bio="Old bio",
         is_professional=False,
-        role="AUTHENTICATED"
+        role="AUTHENTICATED",
+        hashed_password=hashed_password
     )
     db_session.add(user)
     await db_session.commit()
